@@ -6,6 +6,8 @@ function VideoPlayer() {
   const video2Ref = useRef(null);
   const progressBarRef = useRef(null);
   const progressContainerRef = useRef(null);
+  const elapsedTimeRef = useRef(null);
+  const remainingTimeRef = useRef(null);
 
   const [isReady, setIsReady] = useState(false);
   const [totalDuration, setTotalDuration] = useState(0);
@@ -13,6 +15,9 @@ function VideoPlayer() {
   const [isHighlighting, setIsHighlighting] = useState(false);
   const [currentHighlightElement, setCurrentHighlightElement] = useState(null);
   const [highlights, setHighlights] = useState([]); // מערך להיילייטים
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [textNotes, setTextNotes] = useState([]); // מערך לשמירת הטקסט עם הזמן
+  const [inputValue, setInputValue] = useState(""); // הערך של תיבת הטקסט
 
   // פונקציה להמרת זמן לפורמט mm:ss:mls
   const formatTimeMLS = (time) => {
@@ -22,6 +27,13 @@ function VideoPlayer() {
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(milliseconds).padStart(3, '0')}`;
   };
 
+  // פונקציה להמרת זמן לפורמט mm:ss (ללא מילישניות)
+  const formatTime = (time) => {
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  };
+
   useEffect(() => {
     if (!isReady) return;
 
@@ -29,30 +41,36 @@ function VideoPlayer() {
     const video2 = video2Ref.current;
 
     if (video1 && video2) {
-      video1.play();
-      video2.play();
+      if (video1.paused && !video1.ended) {
+        video1.play().catch((error) => console.log(error));
+      }
+      if (video2.paused && !video2.ended) {
+        video2.play().catch((error) => console.log(error));
+      }
 
       video1.addEventListener('pause', () => {
-        if (!video2.paused) {
+        if (!video2.paused && !video2.ended) {
           video2.pause();
         }
       });
 
       video2.addEventListener('pause', () => {
-        if (!video1.paused) {
+        if (!video1.paused && !video1.ended) {
           video1.pause();
         }
       });
 
       video1.addEventListener('play', () => {
-        if (video2.paused) {
-          video2.play();
+        if (video2.paused && !video2.ended) {
+          video2.play().catch((error) => console.log(error));
+
         }
       });
 
       video2.addEventListener('play', () => {
-        if (video1.paused) {
-          video1.play();
+        if (video1.paused && !video1.ended) {
+          video1.play().catch((error) => console.log(error));
+
         }
       });
 
@@ -77,6 +95,10 @@ function VideoPlayer() {
         const progressPercentage = (currentTime / totalDuration) * 100;
         progressBarRef.current.style.width = `${progressPercentage}%`;
 
+        // עדכון השעונים (זמן שחלף וזמן שנותר)
+        elapsedTimeRef.current.textContent = formatTime(currentTime);
+        remainingTimeRef.current.textContent = `-${formatTime(totalDuration - currentTime)}`;
+
         if (isHighlighting && currentHighlightElement) {
           const highlightDuration = currentTime - highlightStartTime;
           currentHighlightElement.style.width = `${(highlightDuration / totalDuration) * 100}%`;
@@ -84,6 +106,7 @@ function VideoPlayer() {
       };
 
       video1.addEventListener('timeupdate', updateProgressBar);
+
 
       return () => {
         video1.removeEventListener('timeupdate', updateProgressBar);
@@ -97,22 +120,67 @@ function VideoPlayer() {
     }
   }, [isReady, totalDuration, isHighlighting, currentHighlightElement, highlightStartTime]);
 
-  // השתמש ב-useEffect להדפסת המערך בכל פעם שהוא מתעדכן
+  // טיפול בלחיצה על רווח (התחלת היילייט) ושחרור רווח (סיום היילייט)
   useEffect(() => {
-    console.log("Current highlights array:", highlights);
-  }, [highlights]); // יופעל בכל פעם שהמערך משתנה
+    const handleKeyDown = (event) => {
+      if (event.code === 'Space' && !isSpacePressed) {
+        setIsSpacePressed(true);
+        if (!isHighlighting) {
+          handleHighlightClick(true); // התחלת היילייט עם רווח
+        }
+      }
+    };
+
+    const handleKeyUp = (event) => {
+      if (event.code === 'Space' && isSpacePressed) {
+        setIsSpacePressed(false);
+        if (isHighlighting) {
+          handleHighlightClick(false); // סיום היילייט עם רווח
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isSpacePressed, isHighlighting]); // מתעדכן לפי מצב הלחיצה
+
+  // טיפול בהזנת הטקסט ושמירתו עם הזמן הנוכחי
+  const handleTextInput = (e) => {
+    if (e.key === 'Enter') {
+      const video1 = video1Ref.current;
+      const currentTime = formatTimeMLS(video1.currentTime); // הזמן הנוכחי בפורמט mm:ss:mls
+
+      // הוספת הטקסט והזמן למערך
+      setTextNotes((prevNotes) => [...prevNotes, { time: currentTime, note: inputValue }]);
+      console.log("Text note added:", { time: currentTime, note: inputValue });
+      console.log("All text notes:", textNotes); // בדיקה עצמית
+
+      // ניקוי תיבת הטקסט לאחר ההזנה
+      setInputValue("");
+    }
+  };
 
   // הפונקציה שתופעל כאשר לוחצים על הכפתור בדיב החדש
   const handleReadyClick = () => {
     setIsReady(true); // מסתיר את הדיב ומציג את שאר האלמנטים
   };
 
-  const handleHighlightClick = () => {
+  const handleHighlightClick = (isStarting) => {
     const video1 = video1Ref.current;
     const currentTime = video1.currentTime;
 
-    if (!isHighlighting) {
-      // Start highlight: יצירת אלמנט חדש להיילייט והתחלת זמן
+    if (!isReady || video1.paused || currentTime === 0) {
+      video1.play(); // במידה והסרטון לא מתנגן, נתחיל את הסרטון
+      return; // לא מבצעים היילייט עד שהסרטון מתחיל לשחק
+    }
+
+    if (isStarting) {
+      // Start highlight: יצירת אלמנט חדש להיילייט והתחלת זמן מהנקודה הנוכחית
       setHighlightStartTime(currentTime);
 
       const newHighlightElement = document.createElement('div');
@@ -154,7 +222,7 @@ function VideoPlayer() {
       }
     }
 
-    setIsHighlighting(!isHighlighting); // מעבר בין מצב פעיל ללא פעיל
+    setIsHighlighting(isStarting); // מעבר בין מצב פעיל ללא פעיל
   };
 
   return (
@@ -196,12 +264,27 @@ function VideoPlayer() {
             controls
           ></video>
 
-          <button onClick={handleHighlightClick} className={isHighlighting ? 'stopButton' : 'startButton'}>
+          <p>You can use the button below or space-button to highlight</p>
+
+          <button onClick={() => handleHighlightClick(!isHighlighting)} className={isHighlighting ? 'stopButton' : 'startButton'}>
             {isHighlighting ? 'End Highlight' : 'Start Highlight'}
           </button>
 
+          {/* תיבת הטקסט לקליטת טקסט מהמשתמש */}
+          <input
+            className='text-input'
+            type="text"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleTextInput}
+            placeholder="Enter your note and press Enter"
+          />
+
           <div className="progress-container" ref={progressContainerRef}>
             <div className="progress-bar" ref={progressBarRef}></div>
+            {/* הצגת השעונים */}
+            <div className="timer elapsed-time" ref={elapsedTimeRef}>00:00</div>
+            <div className="timer remaining-time" ref={remainingTimeRef}>-00:00</div>
           </div>
         </>
       )}
